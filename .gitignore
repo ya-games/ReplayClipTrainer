@@ -1,0 +1,26 @@
+# Build output (custom OutDir/IntDir set in the .vcxproj)
+ReplayClipTrainer/build/
+ReplayClipTrainer/plugins/
+
+# Visual Studio
+.vs/
+*.vcxproj.user
+*.sdf
+*.opensdf
+*.suo
+
+# Generic MSBuild/C++ leftovers, in case configs are ever added that don't use the custom OutDir/IntDir
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.log
+*.tlog
+
+# Claude Code session-local config (not part of the published project)
+.claude/
