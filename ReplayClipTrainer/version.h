@@ -2,7 +2,7 @@
 //SemVer-style: bump MAJOR for breaking changes, MINOR for backward-compatible features, PATCH for
 //bug fixes. Bumped manually at release time - not tied to build count or commit count.
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 0
+#define VERSION_MINOR 1
 #define VERSION_PATCH 0
 //Windows' FILEVERSION/PRODUCTVERSION resource fields (see ReplayClipTrainer.rc) require exactly 4
 //numbers - this 4th one is fixed at 0 and isn't part of the version shown anywhere (see plugin_version
