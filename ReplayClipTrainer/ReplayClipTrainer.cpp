@@ -111,6 +111,15 @@ void ReplayClipTrainer::CvarRegister() {
 	cvarManager->registerCvar("reclip_convertClip", "0", "converts only a short clip around the current replay scrub position (see reclip_clipSecondsBefore/reclip_clipSecondsAfter)", true, true, 0.0f, true, 1.0f, false).addOnValueChanged(std::bind(&ReplayClipTrainer::ConvertClip, this, std::placeholders::_1, std::placeholders::_2));
 	cvarManager->registerCvar("reclip_openReplay", "0", "opens saved ReplayClipTrainer", true, true, 0.0f, true, 1.0f, false).addOnValueChanged(std::bind(&ReplayClipTrainer::OpenReplay, this, std::placeholders::_1, std::placeholders::_2));
 	cvarManager->registerCvar("reclip_autoConvert", "0", "automaticly converts replays into ReplayClipTrainers", true, true, 0.0f, true, 1.0f, true).addOnValueChanged(std::bind(&ReplayClipTrainer::AutoConvertCvar, this, std::placeholders::_1, std::placeholders::_2));
+	cvarManager->registerNotifier("reclip_saveClip", [this](std::vector<std::string> params) {
+		//params[0] is the command name itself; anything after that is the (optional) clip name, like "Save for Later" in the GUI - joined back together so a multi-word name doesn't need quoting
+		std::string name;
+		for (size_t i = 1; i < params.size(); i++) {
+			if (i > 1) { name += " "; }
+			name += params[i];
+		}
+		gameWrapper->SetTimeout([this, name](GameWrapper*) { this->ConvertClipToFile(name); }, 0.0f);
+	}, "saves a clip around the current replay scrub position to file, like \"Save for Later\" in the GUI (name optional, auto-named like the GUI if omitted)", PERMISSION_ALL);
 
 	cvarManager->registerCvar("reclip_doNotAskForDisableOfIncompatiblePlugins", "0", "asks for disableing plugins by ReplayClipTrainer", true, true, 0.0f, true, 1.0f, true);
 	
@@ -125,6 +134,7 @@ void ReplayClipTrainer::CvarRegister() {
 	cvarManager->registerCvar("reclip_clipSecondsBefore", "2", "for reclip_convertClip: seconds before the current replay position to start converting", true, true, 0.0f, true, 1200.0f, true);
 	cvarManager->registerCvar("reclip_clipSecondsAfter", "5", "for reclip_convertClip: seconds after the current replay position to stop converting", true, true, 0.0f, true, 1200.0f, true);
 	cvarManager->registerCvar("reclip_disableGoal", "1", "disables the goal", false, true, 0.0f, true, 1.0f, true);
+	cvarManager->registerCvar("reclip_ballFreePhysics", "0", "lets the ball go free to real physics as soon as you resume from pause, instead of following the recorded path", true, true, 0.0f, true, 1.0f, false);
 	return;
 }
 
@@ -631,6 +641,9 @@ void ReplayClipTrainer::ControllGame(std::string oldValue, CVarWrapper cvar) {
 			//reset values
 			cvarManager->getCvar("reclip_jumpIn").setValue(0);
 			cvarManager->getCvar("reclip_pause").setValue(0);
+			//clear this each new session so a checkbox left on from a previous clip doesn't silently
+			//affect this one - see reclip_ballFreePhysics comment in ControllGamePerTick()
+			cvarManager->getCvar("reclip_ballFreePhysics").setValue(false);
 			Tick = 0;
 			carit = (RecordedSpectateIndex >= 0 && RecordedSpectateIndex < LobbySize) ? RecordedSpectateIndex : 0;
 			CountdownTime = 0;
@@ -765,6 +778,14 @@ void ReplayClipTrainer::ControllGamePerTick(std::string eventName) {
 				}
 				//jumpin ghosthit exemption
 				if (CarPositionsPerFrame.at(((Tick + 8) * LobbySize) + carit).ballTouches != CarPositionsPerFrame.at(((Tick + 7) * LobbySize) + carit).ballTouches && cvarManager->getCvar("reclip_jumpIn").getBoolValue() == true) {
+					setBally = false;
+				}
+				//manual "let ball go free" toggle - lets the ball follow real physics from the moment
+				//you resume from pause, instead of only when a recorded/real touch is detected. Useful
+				//for practicing touches that happen later than the original recording. Only takes effect
+				//while unpaused - during pause, the block below (reset pause) keeps forcing setBally=true
+				//every tick, so checking this box during pause has no visible effect until you resume.
+				if (cvarManager->getCvar("reclip_ballFreePhysics").getBoolValue() == true && cvarManager->getCvar("reclip_pause").getBoolValue() == false && cvarManager->getCvar("reclip_jumpIn").getBoolValue() == true) {
 					setBally = false;
 				}
 				//score exemption

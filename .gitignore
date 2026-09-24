@@ -24,6 +24,7 @@ x86/
 
 # Claude Code session-local config (not part of the published project)
 .claude/
+/CLAUDE.local.md
 
 # Packaged release zips staged for manual upload to GitHub Releases - not committed to the repo
 /*.zip

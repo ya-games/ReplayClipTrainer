@@ -40,7 +40,7 @@ static void SteppedFloatSlider(const char* cvarName, const char* label, float mi
 void ReplayClipTrainer::RenderSettingsGui() {
 	bool conversionInProgress = cvarManager->getCvar("reclip_replaySave").getBoolValue();
 
-	ImGui::TextWrapped("How to use: while watching a replay, scrub to the moment you want, then click \"Convert Clip Around Current Position\" to train it right away, or \"Save Clip to File\" to save it for later.");
+	ImGui::TextWrapped("How to use: while watching a replay, scrub to the moment you want, then click \"Train Now\" to train it right away, or \"Save for Later\" to save it for later.");
 	ImGui::TextWrapped("Do not change Teams, restart Match, or go to Spectate while converting.");
 	if (conversionInProgress) {
 		ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "A clip is currently being converted - please wait (or press Cancel on the progress bar).");
@@ -85,10 +85,11 @@ void ReplayClipTrainer::RenderSettingsGui() {
 	ImGui::Separator();
 	SteppedFloatSlider("reclip_clipSecondsBefore", "Seconds Before Scrub Position", 0.0f, 20.0f, 0.5f);
 	SteppedFloatSlider("reclip_clipSecondsAfter", "Seconds After Scrub Position", 0.0f, 20.0f, 0.5f);
+	SteppedFloatSlider("reclip_resolution", "Conversion Resolution", 0.1f, 2.0f, 0.1f);
 	if (conversionInProgress) {
-		ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Convert Clip Around Current Position");
+		ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Train Now");
 	}
-	else if (ImGui::Button("Convert Clip Around Current Position")) { gameWrapper->SetTimeout([this](GameWrapper*) { cvarManager->executeCommand("reclip_convertClip 1"); }, 0.0f); }
+	else if (ImGui::Button("Train Now")) { gameWrapper->SetTimeout([this](GameWrapper*) { cvarManager->executeCommand("reclip_convertClip 1"); }, 0.0f); }
 	ImGui::TextWrapped("Converts only a short clip around the replay's current scrub position (scrub to the moment you want first, then click this). Opens a private match and starts training right away.");
 	if (!lastClipRangeError.empty()) {
 		ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", lastClipRangeError.c_str());
@@ -98,9 +99,9 @@ void ReplayClipTrainer::RenderSettingsGui() {
 	static char clipNameBuf[128] = "";
 	ImGui::InputTextWithHint("##clipName", "Clip name (optional, auto-named if left blank)", clipNameBuf, sizeof(clipNameBuf));
 	if (conversionInProgress) {
-		ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Save Clip to File");
+		ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Save for Later");
 	}
-	else if (ImGui::Button("Save Clip to File")) {
+	else if (ImGui::Button("Save for Later")) {
 		std::string name(clipNameBuf);
 		gameWrapper->SetTimeout([this, name](GameWrapper*) { this->ConvertClipToFile(name); }, 0.0f);
 		clipNameBuf[0] = '\0';
@@ -215,7 +216,6 @@ void ReplayClipTrainer::RenderSettingsGui() {
 	ImGui::Spacing();
 	ImGui::Text("Settings:");
 	ImGui::Separator();
-	SteppedFloatSlider("reclip_resolution", "Conversion Resolution", 0.1f, 2.0f, 0.1f);
 	bool settingLimitedBoost = cvarManager->getCvar("reclip_limitedBoost").getBoolValue();
 	if (ImGui::Checkbox("Limited Boost in Replay", &settingLimitedBoost)) { cvarManager->getCvar("reclip_limitedBoost").setValue(settingLimitedBoost); }
 	bool settingNormalTraining = cvarManager->getCvar("reclip_inputToUnpause").getBoolValue();
@@ -224,6 +224,9 @@ void ReplayClipTrainer::RenderSettingsGui() {
 	if (ImGui::Checkbox("Show HUD in ReplayClipTrainer", &settingHUD)) { cvarManager->getCvar("reclip_showHud").setValue(settingHUD); }
 	bool settingDisableGoal = cvarManager->getCvar("reclip_disableGoal").getBoolValue();
 	if (ImGui::Checkbox("Disable Goal Replay/Explosion", &settingDisableGoal)) { cvarManager->getCvar("reclip_disableGoal").setValue(settingDisableGoal); }
+	bool settingBallFreePhysics = cvarManager->getCvar("reclip_ballFreePhysics").getBoolValue();
+	if (ImGui::Checkbox("Let Ball Go Free on Resume (Experimental)", &settingBallFreePhysics)) { cvarManager->getCvar("reclip_ballFreePhysics").setValue(settingBallFreePhysics); }
+	ImGui::TextWrapped("While checked, resuming from pause immediately hands the ball to real physics instead of following the recorded path - useful for practicing touches that happen later than the original recording.");
 
 	ImGui::Spacing();
 	ImGui::Text("Bindings:");
