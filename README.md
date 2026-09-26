@@ -11,12 +11,11 @@ ReplayClipTrainer は、Rocket League のリプレイを「操作できる練習
 1. リポジトリの Releases（またはビルド済みzip）から `.dll` ファイルを取得します。
 2. `.dll` ファイルを BakkesMod のプラグインフォルダにコピーします。
    - `C:\Users\<ユーザー名>\AppData\Roaming\bakkesmod\bakkesmod\plugins`
-3. 設定ファイル（`plugins\settings` 内）も同様に対応するフォルダへコピーします。
-4. 起動時に自動読み込みさせたい場合は、`cfg\plugins.cfg` の末尾に以下を追記します。
+3. 起動時に自動読み込みさせたい場合は、`cfg\plugins.cfg` の末尾に以下を追記します。
    ```
    plugin load replaycliptrainer
    ```
-5. Rocket League を起動すれば使用できます。
+4. Rocket League を起動すれば使用できます。
 
 ## 使い方
 
