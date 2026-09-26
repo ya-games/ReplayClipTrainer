@@ -10,6 +10,7 @@
 #include "compatibility.h"
 
 #include <vector>
+#include <chrono>
 struct ImFont;
 //shown in the settings GUI and BakkesMod's plugin list. SemVer-style (MAJOR.MINOR.PATCH), bumped
 //manually at release time - see version.h for what each number means.
@@ -214,6 +215,11 @@ public:
 	//gives the engine's velocity replication time to settle so a high (e.g. supersonic) speed
 	//doesn't get reset to 0 on handoff
 	int jumpInSettleTicks = 0;
+	//debounces reclip_jumpIn's toggle bind - holding the bound gamepad button (e.g. Select/Back) can
+	//re-fire the toggle every tick instead of once per physical press, making JumpIn/JumpOut flicker
+	//back and forth. See JumpIn() in ReplayClipTrainer.cpp.
+	std::chrono::steady_clock::time_point lastJumpInToggleTime{};
+	bool suppressJumpInCallback = false;
 
 
 	//Overlay

@@ -69,7 +69,38 @@ static std::string FileTimeToString(const std::filesystem::path& path) {
 }
 
 
-BAKKESMOD_PLUGIN(ReplayClipTrainer, "ReplayClipTrainer is a bakkesmod Plugin which allows you to open replays in a private match and take control of any car in any situation", plugin_version, PLUGINTYPE_FREEPLAY)
+//Manually expanded equivalent of BAKKESMOD_PLUGIN(ReplayClipTrainer, "...", plugin_version,
+//PLUGINTYPE_FREEPLAY) (see bakkesmodplugin.h) instead of using the macro directly, so a fixed
+//filename literal can be supplied instead of __FILE__. MSVC treats __FILE__ as a reserved macro
+//and silently ignores any attempt to #undef/#define it (warning C4117), so overriding it isn't
+//possible - without this, the macro bakes the builder's local absolute source path (including
+//their Windows username) into the shipped DLL, visible to any user in BakkesMod's plugin-load
+//console log.
+static std::shared_ptr<ReplayClipTrainer> singleton;
+extern "C" {
+	BAKKESMOD_PLUGIN_EXPORT uintptr_t getPlugin()
+	{
+		if (!singleton) {
+			singleton = std::shared_ptr<ReplayClipTrainer>(new ReplayClipTrainer());
+		}
+		return reinterpret_cast<std::uintptr_t>(&singleton);
+	}
+	BAKKESMOD_PLUGIN_EXPORT void deleteMe() {
+		if (singleton)
+			singleton = nullptr;
+	}
+	BAKKESMOD_PLUGIN_EXPORT BakkesMod::Plugin::PluginInfo exports =
+	{
+		BAKKESMOD_PLUGIN_API_VERSION,
+		"ReplayClipTrainer.cpp",
+		"ReplayClipTrainer",
+		"ReplayClipTrainer is a bakkesmod Plugin which allows you to open replays in a private match and take control of any car in any situation",
+		plugin_version,
+		PLUGINTYPE_FREEPLAY,
+		getPlugin,
+		deleteMe
+	};
+}
 
 std::shared_ptr<CVarManagerWrapper> _globalCvarManager;
 
@@ -991,6 +1022,18 @@ void ReplayClipTrainer::SwitchBack(std::string oldValue, CVarWrapper cvar) {
 //jump In
 
 void ReplayClipTrainer::JumpIn(std::string oldValue, CVarWrapper cvar) {
+	if (suppressJumpInCallback) { return; } //re-entrant call from our own revert below - ignore
+	auto now = std::chrono::steady_clock::now();
+	if (now - lastJumpInToggleTime < std::chrono::milliseconds(400)) {
+		//holding the bound gamepad button can re-fire this toggle every tick instead of once per
+		//physical press, flickering JumpIn/JumpOut back and forth. Revert this extra toggle so a
+		//long press only flips state once - see the member comment in the header.
+		suppressJumpInCallback = true;
+		cvar.setValue(oldValue);
+		suppressJumpInCallback = false;
+		return;
+	}
+	lastJumpInToggleTime = now;
 	if (gameWrapper->IsInGame() == true && cvarManager->getCvar("reclip_controllGame").getBoolValue() == true) {
 		BallHits = gameWrapper->GetGameEventAsServer().GetPRIs().Get(0).GetBallTouches();
 		if (cvar.getIntValue() == 1) {
