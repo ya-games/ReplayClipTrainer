@@ -115,7 +115,7 @@ void ReplayClipTrainer::RenderSettingsGui() {
 	ImGui::Spacing();
 	ImGui::Text("Saved Clips:");
 	ImGui::Separator();
-	if (ImGui::Button("Refresh List")) { RefreshSavedClipsList(); }
+	if (ImGui::Button("Refresh List")) { RefreshActiveClipList(); }
 	ImGui::SameLine();
 	if (ImGui::Button("Open Clips Folder")) { gameWrapper->SetTimeout([this](GameWrapper*) { this->OpenClipsFolder(); }, 0.0f); }
 	ImGui::SameLine();
@@ -135,8 +135,22 @@ void ReplayClipTrainer::RenderSettingsGui() {
 	if (showNoClipWarning) {
 		ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "No clip converted or loaded yet - nothing to retry.");
 	}
-	if (savedClips.empty() && savedClipFolders.empty()) {
-		ImGui::TextWrapped("No saved clips yet.");
+	if (ImGui::Checkbox("Recent clips only", &showRecentClips)) { RefreshActiveClipList(); }
+	if (showRecentClips) {
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(100);
+		if (ImGui::BeginCombo("##recentHours", (std::to_string(recentClipHours) + " hours").c_str())) {
+			for (int hours : {1, 3, 6, 12, 24, 48}) {
+				if (ImGui::Selectable((std::to_string(hours) + " hours").c_str(), hours == recentClipHours)) {
+					recentClipHours = hours;
+					RefreshRecentClipsList();
+				}
+			}
+			ImGui::EndCombo();
+		}
+	}
+	if (showRecentClips ? recentClips.empty() : (savedClips.empty() && savedClipFolders.empty())) {
+		ImGui::TextWrapped("%s", showRecentClips ? "No clips saved within the selected time window." : "No saved clips yet.");
 	}
 	std::string clipToDelete;
 	std::string folderToEnter;
@@ -144,18 +158,7 @@ void ReplayClipTrainer::RenderSettingsGui() {
 	//two-click confirmation for deleting a clip, to avoid an accidental single misclick losing it -
 	//static so it persists across frames until confirmed or cancelled
 	static std::string pendingDeleteConfirm;
-	ImGui::BeginChild("SavedClipsList", ImVec2(0, 180), true);
-	if (!currentClipFolder.empty()) {
-		if (ImGui::Button("<- Back")) { goBackFolder = true; }
-		ImGui::SameLine();
-		ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "/%s", currentClipFolder.c_str());
-	}
-	for (const std::string& folderName : savedClipFolders) {
-		ImGui::PushID(("folder_" + folderName).c_str());
-		if (ImGui::Button(("[Folder] " + folderName).c_str())) { folderToEnter = folderName; }
-		ImGui::PopID();
-	}
-	for (const SavedClipInfo& clip : savedClips) {
+	auto renderClipRow = [&](const SavedClipInfo& clip, bool showFolder) {
 		std::string filename = std::filesystem::u8path(clip.path).stem().u8string();
 		ImGui::PushID(clip.path.c_str());
 		if (clip.isCompatible && !conversionInProgress) {
@@ -184,12 +187,35 @@ void ReplayClipTrainer::RenderSettingsGui() {
 		if (clip.isCompatible) {
 			if (!clip.saveTimeStr.empty()) { label += " - " + clip.saveTimeStr; }
 			if (clip.playerCount > 0) { label += " - " + std::to_string(clip.playerCount) + "p"; }
+			if (showFolder) { label += " - in " + (clip.folder.empty() ? std::string("(root)") : clip.folder); }
 			ImGui::Text("%s", label.c_str());
 		}
 		else {
-			ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "%s (incompatible)", filename.c_str());
+			if (showFolder) { label += " - in " + (clip.folder.empty() ? std::string("(root)") : clip.folder); }
+			ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "%s (incompatible)", label.c_str());
 		}
 		ImGui::PopID();
+	};
+	ImGui::BeginChild("SavedClipsList", ImVec2(0, 180), true);
+	if (showRecentClips) {
+		for (const SavedClipInfo& clip : recentClips) {
+			renderClipRow(clip, true);
+		}
+	}
+	else {
+		if (!currentClipFolder.empty()) {
+			if (ImGui::Button("<- Back")) { goBackFolder = true; }
+			ImGui::SameLine();
+			ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "/%s", currentClipFolder.c_str());
+		}
+		for (const std::string& folderName : savedClipFolders) {
+			ImGui::PushID(("folder_" + folderName).c_str());
+			if (ImGui::Button(("[Folder] " + folderName).c_str())) { folderToEnter = folderName; }
+			ImGui::PopID();
+		}
+		for (const SavedClipInfo& clip : savedClips) {
+			renderClipRow(clip, false);
+		}
 	}
 	ImGui::EndChild();
 	//navigation/deletion are applied here rather than inline above, since RefreshSavedClipsList()
@@ -207,7 +233,7 @@ void ReplayClipTrainer::RenderSettingsGui() {
 	}
 	if (!clipToDelete.empty()) {
 		std::filesystem::remove(std::filesystem::u8path(clipToDelete));
-		RefreshSavedClipsList();
+		RefreshActiveClipList();
 	}
 	if (!lastLoadClipError.empty()) {
 		ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed to load clip: %s", lastLoadClipError.c_str());

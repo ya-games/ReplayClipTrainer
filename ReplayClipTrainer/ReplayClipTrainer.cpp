@@ -1220,6 +1220,44 @@ void ReplayClipTrainer::RefreshSavedClipsList() {
 	std::sort(savedClipFolders.begin(), savedClipFolders.end());
 }
 
+//lists every clip under the clips root at any depth (flattened) that was saved within recentClipHours,
+//newest first. Uses last-write time, which Explorer moves/renames preserve, so the window still reflects
+//when each clip was actually saved even after it's been filed into a subfolder.
+void ReplayClipTrainer::RefreshRecentClipsList() {
+	recentClips.clear();
+	std::filesystem::path root = GetClipsRootFolder(gameWrapper.get());
+	std::error_code ec;
+	if (!std::filesystem::exists(root, ec)) { return; }
+	std::filesystem::file_time_type cutoff = std::filesystem::file_time_type::clock::now() - std::chrono::hours(recentClipHours);
+	std::filesystem::recursive_directory_iterator it(root, std::filesystem::directory_options::skip_permission_denied, ec);
+	std::filesystem::recursive_directory_iterator end;
+	for (; !ec && it != end; it.increment(ec)) {
+		const std::filesystem::directory_entry& entry = *it;
+		std::error_code entryEc;
+		if (!entry.is_regular_file(entryEc) || entry.path().extension() != ".reclip") { continue; }
+		std::filesystem::file_time_type writeTime = std::filesystem::last_write_time(entry.path(), entryEc);
+		if (entryEc || writeTime < cutoff) { continue; }
+
+		SavedClipInfo info;
+		info.path = entry.path().u8string();
+		ClipMetadata meta = ClipFile::PeekMetadata(entry.path());
+		info.isCompatible = meta.isCompatible;
+		info.saveTimeStr = FileTimeToString(entry.path());
+		info.playerCount = meta.lobbySize;
+		info.folder = std::filesystem::relative(entry.path().parent_path(), root, entryEc).u8string();
+		if (info.folder == ".") { info.folder.clear(); }
+		info.writeTime = writeTime;
+		recentClips.push_back(info);
+	}
+	std::sort(recentClips.begin(), recentClips.end(), [](const SavedClipInfo& a, const SavedClipInfo& b) { return a.writeTime > b.writeTime; });
+}
+
+//refreshes whichever list the settings GUI is currently showing
+void ReplayClipTrainer::RefreshActiveClipList() {
+	if (showRecentClips) { RefreshRecentClipsList(); }
+	else { RefreshSavedClipsList(); }
+}
+
 //opens the currently browsed clips folder in Windows Explorer
 void ReplayClipTrainer::OpenClipsFolder() {
 	std::filesystem::path root = GetClipsRootFolder(gameWrapper.get());

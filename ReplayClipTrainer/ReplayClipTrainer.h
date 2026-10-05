@@ -11,6 +11,7 @@
 
 #include <vector>
 #include <chrono>
+#include <filesystem>
 struct ImFont;
 //shown in the settings GUI and BakkesMod's plugin list. SemVer-style (MAJOR.MINOR.PATCH), bumped
 //manually at release time - see version.h for what each number means.
@@ -66,6 +67,10 @@ struct SavedClipInfo
 	bool isCompatible;
 	std::string saveTimeStr;
 	int playerCount = 0;
+	//folder relative to the clips root (UTF-8, '/'-separated); empty means the root itself. Only
+	//filled in for the flattened recent-clips list.
+	std::string folder;
+	std::filesystem::file_time_type writeTime{};
 };
 
 class ReplayClipTrainer: public BakkesMod::Plugin::BakkesModPlugin, /*public BakkesMod::Plugin::PluginSettingsWindow,*/ public BakkesMod::Plugin::PluginWindow
@@ -94,6 +99,8 @@ public:
 	void SaveCurrentClipToFile(std::string name);
 	void LoadClipAndOpen(std::string path);
 	void RefreshSavedClipsList();
+	void RefreshRecentClipsList();
+	void RefreshActiveClipList();
 	void OpenClipsFolder();
 	void CancelConversion();
 	std::vector<SavedClipInfo> savedClips;
@@ -103,6 +110,11 @@ public:
 	//empty means the root. Folder creation/deletion is left to Explorer (via Open Clips Folder) -
 	//this is browse-only.
 	std::string currentClipFolder;
+	//"recent clips" view: flat list of every clip under the clips root (any depth) saved within the
+	//last recentClipHours, newest first
+	bool showRecentClips = false;
+	int recentClipHours = 12;
+	std::vector<SavedClipInfo> recentClips;
 	std::string lastLoadClipError;
 	std::string lastClipRangeError;
 	std::string lastSaveClipMessage;
