@@ -119,6 +119,25 @@ ClipMetadata ClipFile::PeekMetadata(const std::filesystem::path& path) {
 	return meta;
 }
 
+//replaces real names with Player1, Player2, ...: the recorded (spectated) player is Player1, then the rest of their team
+//in lobby order, then the opponents in lobby order - so 1v1 gives Player1/2, 2v2 gives 1,2 | 3,4, 3v3 gives 1,2,3 | 4,5,6
+static std::vector<std::string> AnonymizeNames(const std::vector<std::string>& names, const std::vector<int>& teams, int mainIndex) {
+	const int count = static_cast<int>(names.size());
+	std::vector<std::string> result(names.size());
+	if (count == 0 || teams.size() != names.size()) { return names; }
+	if (mainIndex < 0 || mainIndex >= count) { mainIndex = 0; }
+	const int mainTeam = teams[mainIndex];
+	int next = 1;
+	result[mainIndex] = "Player" + std::to_string(next++);
+	for (int i = 0; i < count; i++) {
+		if (i != mainIndex && teams[i] == mainTeam) { result[i] = "Player" + std::to_string(next++); }
+	}
+	for (int i = 0; i < count; i++) {
+		if (teams[i] != mainTeam) { result[i] = "Player" + std::to_string(next++); }
+	}
+	return result;
+}
+
 bool ClipFile::SaveFile(const std::filesystem::path& path, ReplayClipTrainer& plugin) {
 	std::ofstream out(path, std::ios::binary | std::ios::trunc);
 	if (!out.is_open()) { return false; }
@@ -140,7 +159,12 @@ bool ClipFile::SaveFile(const std::filesystem::path& path, ReplayClipTrainer& pl
 	out.write(reinterpret_cast<const char*>(&recordedSpectateIndex), sizeof(recordedSpectateIndex));
 
 	WriteString(out, plugin.Arena);
-	WriteStringVector(out, plugin.playerNames);
+	if (plugin.cvarManager->getCvar("reclip_anonymize").getBoolValue()) {
+		WriteStringVector(out, AnonymizeNames(plugin.playerNames, plugin.StartTeams, plugin.RecordedSpectateIndex));
+	}
+	else {
+		WriteStringVector(out, plugin.playerNames);
+	}
 	WritePodVector(out, plugin.CarLayouts);
 	WritePodVector(out, plugin.StartTeams);
 	WritePodVector(out, plugin.KeyframesInConvert);

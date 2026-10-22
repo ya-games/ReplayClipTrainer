@@ -28,3 +28,6 @@ x86/
 
 # Packaged release zips staged for manual upload to GitHub Releases - not committed to the repo
 /*.zip
+
+# Bash crash dumps
+*.stackdump

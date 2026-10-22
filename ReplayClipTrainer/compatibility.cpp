@@ -25,42 +25,11 @@ void Compatibility::AskForDisable(std::string plugin) {
 	else {
 		LOG("does ask for disable");
 		needsGUI = true;
-		_globalCvarManager->executeCommand("togglemenu ReplayClipTrainer");
+		//the plugin window (always open, see ReplayClipTrainerGUI.cpp) shows the question while needsGUI is set
 		//DisableIncompatiblePlugin(plugin);
 		return;
 	}
 
-}
-
-void Compatibility::ImGuiForAsk() {
-
-	std::string errorMsg = "the plugin " + currentNotCompatiblePlugin + " is unfortunatly incompatible with ReplayClipTrainer do you want to disable " + currentNotCompatiblePlugin+"?";
-	ImGui::Text(errorMsg.c_str());
-
-	std::string disableMsg = "disable " + currentNotCompatiblePlugin;
-	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.7f, 0.0f, 1.f));
-	if(ImGui::Button(disableMsg.c_str())){ 
-		_globalCvarManager->executeCommand("plugin unload " + currentNotCompatiblePlugin); 
-		LOG(currentNotCompatiblePlugin + " was disabled by ReplayClipTrainer");
-		_globalCvarManager->executeCommand("togglemenu ReplayClipTrainer");
-		//_globalCvarManager->executeCommand("reclip_replaySave 1");
-		needsGUI = false;
-	}
-	ImGui::PopStyleColor();
-
-	ImGui::SameLine();
-
-	std::string notdisableMsg = "do not disable " + currentNotCompatiblePlugin;
-	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.78f, 0.0f, 0.0f, 1.f));
-	if(ImGui::Button(notdisableMsg.c_str())){
-		_globalCvarManager->executeCommand("reclip_replaySave 0"); 
-		_globalCvarManager->executeCommand("togglemenu ReplayClipTrainer");
-		needsGUI = false;
-	}
-	ImGui::PopStyleColor();
-
-	bool askForDisable = _globalCvarManager->getCvar("reclip_doNotAskForDisableOfIncompatiblePlugins").getBoolValue();
-	if (ImGui::Checkbox("do not ask again for disabling incompatible plugins", &askForDisable)) { _globalCvarManager->getCvar("reclip_doNotAskForDisableOfIncompatiblePlugins").setValue(askForDisable); }
 }
 
 void Compatibility::DisableIncompatiblePlugin(std::string plugin ) {

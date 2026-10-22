@@ -12,6 +12,9 @@
 #include <vector>
 #include <chrono>
 #include <filesystem>
+#include <atomic>
+#include <mutex>
+#include <string>
 struct ImFont;
 //shown in the settings GUI and BakkesMod's plugin list. SemVer-style (MAJOR.MINOR.PATCH), bumped
 //manually at release time - see version.h for what each number means.
@@ -61,6 +64,14 @@ struct TimeNotConverted
 	int end;
 };
 
+//goal / highlight positions of the replay being watched, shown on the replay position bar
+struct ReplayMarker
+{
+	int frame = 0;
+	int kind = 0; //0 = goal by the blue team, 1 = goal by the orange team, 2 = highlight
+	std::string name;
+};
+
 struct SavedClipInfo
 {
 	std::string path;
@@ -76,6 +87,7 @@ struct SavedClipInfo
 class ReplayClipTrainer: public BakkesMod::Plugin::BakkesModPlugin, /*public BakkesMod::Plugin::PluginSettingsWindow,*/ public BakkesMod::Plugin::PluginWindow
 {
 public:
+	friend struct UiPainter; //the settings-window painter (ReplayClipTrainerGUI.cpp) reads/writes plugin state
 	virtual void onLoad();
 	virtual void onUnload();
 
@@ -102,6 +114,16 @@ public:
 	void RefreshRecentClipsList();
 	void RefreshActiveClipList();
 	void OpenClipsFolder();
+	//clip / folder management for the clips tab. Each returns "" on success or an error key: "exists", "invalid", "notEmpty", "failed".
+	//Folder paths are relative to the clips root, '/'-separated, UTF-8.
+	std::string CreateClipFolder(const std::string& name);                              //inside currentClipFolder
+	std::string RenameClip(const std::string& clipPath, const std::string& newName);
+	std::string RenameClipFolder(const std::string& folderRel, const std::string& newName);
+	std::string MoveClip(const std::string& clipPath, const std::string& destFolderRel);
+	std::string DeleteClipFolder(const std::string& folderRel);                         //empty folders only
+	std::vector<std::string> ListClipFolders();                                         //every folder under the root, "" (the root) first
+	void SaveConfigSoon();                                                              //debounced `writeconfig`, so settings survive a crash
+	std::atomic<bool> configSavePending_{ false };
 	void CancelConversion();
 	std::vector<SavedClipInfo> savedClips;
 	//subfolder names (leaf only, UTF-8) found directly inside the currently browsed clips folder
@@ -116,7 +138,16 @@ public:
 	int recentClipHours = 12;
 	std::vector<SavedClipInfo> recentClips;
 	std::string lastLoadClipError;
+	void RefreshReplayMarkers(); //game thread; fills replayMarkers_ from the replay being watched
+	std::mutex markersMutex_;
+	std::vector<ReplayMarker> replayMarkers_;
+	int markersKey_ = -1; //replay length the markers were fetched for (-1 = none); render thread
+	std::atomic<bool> markersPending_{ false };
+	//Before + After seconds a clip must add up to at least; ConvertClip()/ConvertClipToFile() refuse shorter ones
+	static constexpr float kMinClipTotalSeconds = 5.0f;
+	//non-empty = the last convert attempt was refused as too short (the settings window shows a localized message)
 	std::string lastClipRangeError;
+	//file name (UTF-8) of the last Save for Later attempt; lastSaveClipSucceeded says how it went
 	std::string lastSaveClipMessage;
 	bool lastSaveClipSucceeded = false;
 	bool pendingSaveToFile = false;
@@ -275,12 +306,41 @@ private:
 	bool isMinimized_ = false;
 	std::string menuTitle_ = "ReplayClipTrainer";
 
-	void RenderSettingsGui();
-	void RenderPlayerNameOverlay();
-	void RenderPreparingOverlay();
-	void RenderConversionProgressOverlay();
-	bool cjkFontLoaded_ = false;
-	ImFont* cjkFont_ = nullptr;
+	//---- settings window / overlays (ReplayClipTrainerGUI.cpp) ----
+	void SetupUi();
+	void UiKeepAlive();
+	void EnsureFonts();
+	void SetLanguage(bool japanese);
+	void RenderControls();
+	//game thread (DrawHud) -> render thread: name of the controlled player for the ImGui-drawn HUD text
+	void PublishHudName(bool valid, const std::string& name, int team);
+	void PublishHudTime(const std::string& text);
+	void PublishHudJump(bool jumpedIn);
+
+	static constexpr int kFontCount = 3;
+	ImFont* fonts_[kFontCount] = {};       //Latin font at the baked sizes in kFontPx (ReplayClipTrainerGUI.cpp)
+	ImFont* fontsJa_[kFontCount] = {};     //Japanese font at the same sizes
+	bool fontsRequested_ = false;
+	std::atomic<bool> jpReady_{ false };   //all Japanese sizes loaded -> Japanese text allowed
+	std::vector<unsigned short> jaRanges_; //glyph ranges (ImWchar) of the Japanese font; must outlive the atlas build
+	bool showKeyGuide_ = true;             //small key guide on the training HUD (cvar reclip_showKeyGuide)
+	bool uiJa_ = true;                     //window + overlay language (cvar reclip_language)
+	float uiScale_ = 0.85f;                //settings window size (cvar reclip_ui_scale)
+	float uiOpacity_ = 0.94f;              //settings window opacity (cvar reclip_ui_opacity)
+	float uiW_ = 560.f, uiH_ = 640.f;      //settings window size at 100% scale, dragged with the bottom-right grip (cvars reclip_ui_w/_h)
+	//the ImGui window stays open permanently so the overlays keep rendering; this only shows/hides the settings panel
+	bool controlsVisible_ = false;
+	bool unloading_ = false;
+
+	std::mutex hudMutex_;
+	bool hudNameValid_ = false;
+	std::string hudName_;
+	int hudTeam_ = 0;
+	bool hudTimeValid_ = false;
+	std::string hudTime_;
+	bool hudJumpValid_ = false;
+	bool hudJumpedIn_ = false;
+	std::chrono::steady_clock::time_point hudStamp_{};
 
 	virtual void Render() override;
 	virtual std::string GetMenuName() override;

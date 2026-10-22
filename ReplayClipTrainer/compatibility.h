@@ -8,7 +8,6 @@ public:
 	bool CheckForIncompatibility();
 	void DisableIncompatiblePlugin(std::string plugin);
 	void AskForDisable(std::string plugin);
-	void ImGuiForAsk();
 
 	//std::vector<std::string> LoadedPlugins= gameWrapper->GetPluginManager().GetLoadedPlugins()
 	std::vector<std::string> IncompatiblePlugin = { "trueballheightindicator"};

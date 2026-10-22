@@ -111,6 +111,7 @@ void ReplayClipTrainer::onLoad() {
 	this->CvarRegister();
 	this->AutoConvert();
 	this->RefreshSavedClipsList();
+	this->SetupUi();
 
 
 	//rendering
@@ -120,6 +121,7 @@ void ReplayClipTrainer::onLoad() {
 }
 
 void ReplayClipTrainer::onUnload() {
+	unloading_ = true;
 	gameWrapper->UnhookEvent("Function TAGame.Replay_TA.EventPostTimeSkip");
 	return;
 }
@@ -352,7 +354,8 @@ void ReplayClipTrainer::SaveGameState(std::string eventName) {
 void ReplayClipTrainer::CancelConversion() {
 	gameWrapper->UnhookEvent("Function TAGame.EngineShare_TA.EventPostPhysicsStep");
 	if (gameWrapper->IsInReplay()) {
-		gameWrapper->GetGameEventAsReplay().SetGameSpeed(1.0f);
+		ReplayServerWrapper replayServer = gameWrapper->GetGameEventAsReplay();
+		if (!replayServer.IsNull()) { replayServer.SetGameSpeed(1.0f); }
 	}
 	pendingSaveToFile = false;
 	useClipRange = false;
@@ -1074,7 +1077,6 @@ void ReplayClipTrainer::Convert(std::string oldValue, CVarWrapper cvar) {
 
 //minimum total clip length (before + after) - clips shorter than this aren't useful to train and can
 //run into edge cases (e.g. the private match's own kickoff countdown eating most/all of the clip)
-static const float kMinClipTotalSeconds = 5.0f;
 
 //converts only a short clip around the current replay scrub position
 void ReplayClipTrainer::ConvertClip(std::string oldValue, CVarWrapper cvar) {
@@ -1158,12 +1160,12 @@ void ReplayClipTrainer::SaveCurrentClipToFile(std::string name) {
 	if (file.SaveFile(path, *this)) {
 		this->Log("Saved clip to " + path.u8string());
 		lastSaveClipSucceeded = true;
-		lastSaveClipMessage = "Saved clip: " + path.filename().u8string();
+		lastSaveClipMessage = path.filename().u8string();
 	}
 	else {
 		this->Log("Failed to save clip to " + path.u8string());
 		lastSaveClipSucceeded = false;
-		lastSaveClipMessage = "Failed to save clip to " + path.filename().u8string();
+		lastSaveClipMessage = path.filename().u8string();
 	}
 	this->RefreshSavedClipsList();
 }
@@ -1266,6 +1268,143 @@ void ReplayClipTrainer::OpenClipsFolder() {
 	ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
+//---- clip / folder management ----
+
+//turns a name typed by the user into a single path component; "" when nothing usable is left
+static std::string SanitizeEntryName(const std::string& input) {
+	std::string s;
+	for (char c : input) {
+		const unsigned char uc = static_cast<unsigned char>(c);
+		if (c == '<' || c == '>' || c == ':' || c == '"' || c == '/' || c == '\\' || c == '|' || c == '?' || c == '*' || uc < 0x20) { s += '_'; }
+		else { s += c; }
+	}
+	while (!s.empty() && (s.back() == ' ' || s.back() == '.')) { s.pop_back(); }
+	const size_t start = s.find_first_not_of(' ');
+	if (start == std::string::npos) { return std::string(); }
+	s = s.substr(start);
+	if (s.empty() || IsReservedDeviceName(s)) { return std::string(); }
+	return s;
+}
+
+//a relative folder path coming from the UI must not be able to leave the clips root
+static bool IsSafeRelativePath(const std::string& rel) {
+	if (rel.find(':') != std::string::npos || rel.find('\\') != std::string::npos) { return false; }
+	if (!rel.empty() && rel.front() == '/') { return false; }
+	size_t pos = 0;
+	while (pos <= rel.size()) {
+		size_t next = rel.find('/', pos);
+		if (next == std::string::npos) { next = rel.size(); }
+		const std::string part = rel.substr(pos, next - pos);
+		if (part == "..") { return false; }
+		pos = next + 1;
+	}
+	return true;
+}
+
+//true when path lies inside root
+static bool IsInsideRoot(const std::filesystem::path& root, const std::filesystem::path& path) {
+	const std::filesystem::path rel = path.lexically_normal().lexically_relative(root.lexically_normal());
+	if (rel.empty() || rel == ".") { return false; }
+	return *rel.begin() != "..";
+}
+
+std::string ReplayClipTrainer::CreateClipFolder(const std::string& name) {
+	const std::string clean = SanitizeEntryName(name);
+	if (clean.empty()) { return "invalid"; }
+	if (!IsSafeRelativePath(currentClipFolder)) { return "failed"; }
+	std::filesystem::path root = GetClipsRootFolder(gameWrapper.get());
+	std::filesystem::path base = currentClipFolder.empty() ? root : root / std::filesystem::u8path(currentClipFolder);
+	std::filesystem::path target = base / std::filesystem::path(Utf8ToWString(clean));
+	std::error_code ec;
+	if (std::filesystem::exists(target, ec)) { return "exists"; }
+	if (!std::filesystem::create_directories(target, ec) || ec) { return "failed"; }
+	return std::string();
+}
+
+std::string ReplayClipTrainer::RenameClip(const std::string& clipPath, const std::string& newName) {
+	std::string clean = SanitizeEntryName(newName);
+	if (clean.size() > 7 && clean.compare(clean.size() - 7, 7, ".reclip") == 0) { clean.resize(clean.size() - 7); }
+	if (clean.empty()) { return "invalid"; }
+	std::filesystem::path root = GetClipsRootFolder(gameWrapper.get());
+	std::filesystem::path from = std::filesystem::u8path(clipPath);
+	if (!IsInsideRoot(root, from) || from.extension() != ".reclip") { return "failed"; }
+	std::filesystem::path to = from.parent_path() / std::filesystem::path(Utf8ToWString(clean) + L".reclip");
+	std::error_code ec;
+	if (to == from) { return std::string(); }
+	if (std::filesystem::exists(to, ec)) { return "exists"; }
+	std::filesystem::rename(from, to, ec);
+	return ec ? "failed" : std::string();
+}
+
+std::string ReplayClipTrainer::RenameClipFolder(const std::string& folderRel, const std::string& newName) {
+	const std::string clean = SanitizeEntryName(newName);
+	if (clean.empty()) { return "invalid"; }
+	if (folderRel.empty() || !IsSafeRelativePath(folderRel)) { return "failed"; }
+	std::filesystem::path root = GetClipsRootFolder(gameWrapper.get());
+	std::filesystem::path from = root / std::filesystem::u8path(folderRel);
+	std::filesystem::path to = from.parent_path() / std::filesystem::path(Utf8ToWString(clean));
+	std::error_code ec;
+	if (!std::filesystem::is_directory(from, ec)) { return "failed"; }
+	if (to == from) { return std::string(); }
+	if (std::filesystem::exists(to, ec)) { return "exists"; }
+	std::filesystem::rename(from, to, ec);
+	return ec ? "failed" : std::string();
+}
+
+std::string ReplayClipTrainer::MoveClip(const std::string& clipPath, const std::string& destFolderRel) {
+	if (!IsSafeRelativePath(destFolderRel)) { return "failed"; }
+	std::filesystem::path root = GetClipsRootFolder(gameWrapper.get());
+	std::filesystem::path from = std::filesystem::u8path(clipPath);
+	if (!IsInsideRoot(root, from) || from.extension() != ".reclip") { return "failed"; }
+	std::filesystem::path destDir = destFolderRel.empty() ? root : root / std::filesystem::u8path(destFolderRel);
+	std::error_code ec;
+	if (!std::filesystem::is_directory(destDir, ec)) { return "failed"; }
+	std::filesystem::path to = destDir / from.filename();
+	if (to == from) { return std::string(); }
+	if (std::filesystem::exists(to, ec)) { return "exists"; }
+	std::filesystem::rename(from, to, ec);
+	return ec ? "failed" : std::string();
+}
+
+std::string ReplayClipTrainer::DeleteClipFolder(const std::string& folderRel) {
+	if (folderRel.empty() || !IsSafeRelativePath(folderRel)) { return "failed"; }
+	std::filesystem::path root = GetClipsRootFolder(gameWrapper.get());
+	std::filesystem::path folder = root / std::filesystem::u8path(folderRel);
+	std::error_code ec;
+	if (!std::filesystem::is_directory(folder, ec)) { return "failed"; }
+	if (std::filesystem::directory_iterator(folder, ec) != std::filesystem::directory_iterator()) { return "notEmpty"; }
+	std::filesystem::remove(folder, ec);
+	return ec ? "failed" : std::string();
+}
+
+std::vector<std::string> ReplayClipTrainer::ListClipFolders() {
+	std::vector<std::string> folders{ std::string() };
+	std::filesystem::path root = GetClipsRootFolder(gameWrapper.get());
+	std::error_code ec;
+	if (!std::filesystem::exists(root, ec)) { return folders; }
+	std::filesystem::recursive_directory_iterator it(root, std::filesystem::directory_options::skip_permission_denied, ec);
+	std::filesystem::recursive_directory_iterator end;
+	std::vector<std::string> found;
+	for (; !ec && it != end; it.increment(ec)) {
+		std::error_code entryEc;
+		if (!it->is_directory(entryEc) || entryEc) { continue; }
+		found.push_back(it->path().lexically_relative(root).generic_u8string());
+	}
+	std::sort(found.begin(), found.end());
+	folders.insert(folders.end(), found.begin(), found.end());
+	return folders;
+}
+
+//the plugin's settings are only written to config.cfg when the game exits normally; after a crash they were lost.
+//Writing again shortly after a change (debounced) keeps them.
+void ReplayClipTrainer::SaveConfigSoon() {
+	if (configSavePending_.exchange(true)) { return; }
+	gameWrapper->SetTimeout([this](GameWrapper*) {
+		configSavePending_ = false;
+		cvarManager->executeCommand("writeconfig");
+	}, 1.5f);
+}
+
 void ReplayClipTrainer::JoinedFreeplay(std::string eventName) {
 	//gameWrapper->HookEvent("Function TAGame.Ball_TA.SetGameEvent", std::bind(&ReplayClipTrainer::BallSpawned, this, std::placeholders::_1));
 	gameWrapper->SetTimeout([this](GameWrapper* gw) {
@@ -1319,14 +1458,14 @@ void ReplayClipTrainer::OpenReplay(std::string oldValue, CVarWrapper cvar) {
 void ReplayClipTrainer::Bindings(std::string oldValue, CVarWrapper cvar) {
 	if (cvar.getBoolValue() == true) {
 		//controller
-		cvarManager->executeCommand("bind XboxTypeS_DPad_Right 'default_right; reclip_skip 10'");
+		cvarManager->executeCommand("bind XboxTypeS_DPad_Right 'default_right; reclip_skip 5'");
 		cvarManager->executeCommand("bind XboxTypeS_DPad_Left 'default_left; reclip_skip -5'");
 		cvarManager->executeCommand("bind XboxTypeS_DPad_Up 'default_up; reclip_switchPlayer 1'");
 		cvarManager->executeCommand("bind XboxTypeS_DPad_Down 'default_down; reclip_switchBack 1'");
 		cvarManager->executeCommand("bind XboxTypeS_Back 'toggle reclip_jumpIn 1 0'");
 		cvarManager->executeCommand("bind XboxTypeS_LeftThumbStick 'toggle reclip_pause 1 0'");
 		//keyboard
-		cvarManager->executeCommand("bind Right 'reclip_skip 10'");
+		cvarManager->executeCommand("bind Right 'reclip_skip 5'");
 		cvarManager->executeCommand("bind Left 'reclip_skip -5'");
 		cvarManager->executeCommand("bind Up 'reclip_switchPlayer 1'");
 		cvarManager->executeCommand("bind Down 'reclip_switchBack 1'");
@@ -1380,6 +1519,8 @@ void ReplayClipTrainer::DrawTime(CanvasWrapper canvas) {
 	std::stringstream SSecondsAvailable;
 	SSecondsAvailable << std::setw(2) << std::setfill('0') << SecondsAvailable;
 	std::string StringSecondsAvailable = SSecondsAvailable.str();
+	const std::string timeText = std::to_string(MinutesDone) + ":" + StringSecondsDone + "/" + std::to_string(MinutesAvailable) + ":" + StringSecondsAvailable;
+	if (jpReady_) { PublishHudTime(timeText); return; } //ImGui draws it (sharper than the canvas font)
 	//draw time
 	canvas.SetColor(236, 236, 236, 255);
 	canvas.SetPosition(Vector2{ ConvertToScreenSizeX(1361),ConvertToScreenSizeY(1000) });
@@ -1443,6 +1584,13 @@ void ReplayClipTrainer::DrawTimelineNotConverted(CanvasWrapper canvas) {
 
 void ReplayClipTrainer::DrawPlayer(CanvasWrapper canvas) {
 
+	//the canvas font has no Japanese glyphs - once the Japanese font is loaded, ImGui draws the name instead
+	//(RenderPlayerName in ReplayClipTrainerGUI.cpp reads what is published here)
+	if (jpReady_) {
+		PublishHudName(true, playerNames.at(carit), static_cast<int>(StartTeams.at(carit)));
+		return;
+	}
+
 	//team color
 	if ((static_cast<int>(StartTeams.at(carit))) == 0) {
 		canvas.SetColor(12, 136, 252, 255);//blue
@@ -1459,6 +1607,7 @@ void ReplayClipTrainer::DrawPlayer(CanvasWrapper canvas) {
 //JumpIn
 
 void ReplayClipTrainer::DrawJumpIn(CanvasWrapper canvas) {
+	if (jpReady_) { PublishHudJump(cvarManager->getCvar("reclip_jumpIn").getBoolValue()); return; } //ImGui draws it
 	canvas.SetPosition(Vector2{ ConvertToScreenSizeX(1240),ConvertToScreenSizeY(920) });
 	if (cvarManager->getCvar("reclip_jumpIn").getBoolValue() != true) {
 		//jumpout
