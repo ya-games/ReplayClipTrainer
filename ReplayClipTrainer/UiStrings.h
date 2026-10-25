@@ -77,7 +77,6 @@
 	X(btnCancel,    "Cancel",     u8"キャンセル") \
 	X(btnBack,      "Back",       u8"戻る") \
 	X(txtIncompat,  "incompatible", u8"非対応") \
-	X(txtIn,        "in",         u8"場所:") \
 	X(txtRoot,      "(root)",     u8"(ルート)") \
 	X(loadFail,     "Failed to load clip", u8"クリップの読み込みに失敗しました") \
 	X(lblTraining,  "TRAINING",   u8"練習中の設定") \

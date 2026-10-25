@@ -704,7 +704,7 @@ void UiPainter::TabClips(ImVec2 o, float w, float h)
 	const std::vector<SavedClipInfo>& clips = recent ? p->recentClips : p->savedClips;
 
 	Scroll sc = BeginScroll("##clips", ImVec2(o.x, y), w, (std::max)(60.f * u, o.y + h - y));
-	const float rw = w - ImGui::GetStyle().ScrollbarSize - 8.f * u, rh = 56.f * u;
+	const float rw = w - ImGui::GetStyle().ScrollbarSize - 8.f * u, rh = 48.f * u;
 	float ly = 0.f;
 	auto at = [&](float x, float yy) { return ImVec2(sc.base.x + x, sc.base.y + yy); };
 	auto rowBg = [&](ImVec2 a, bool hot) {
@@ -747,6 +747,7 @@ void UiPainter::TabClips(ImVec2 o, float w, float h)
 	}
 
 	int ci = 0;
+	std::string tip;
 	for (const SavedClipInfo& clip : clips) {
 		ImVec2 a = at(0, ly);
 		const bool hot = ImGui::IsMouseHoveringRect(a, ImVec2(a.x + rw, a.y + rh)) && ImGui::IsWindowHovered();
@@ -756,62 +757,84 @@ void UiPainter::TabClips(ImVec2 o, float w, float h)
 		const char* lLoad = Tr(ui::btnLoad);
 		const char* lDel = Tr(pending ? ui::btnConfirm : ui::btnDelete);
 		const char* lCancel = Tr(ui::btnCancel);
-		const float bhgt = 32.f * u, by = a.y + (rh - bhgt) * 0.5f;
+		const float bhgt = 26.f * u, by = a.y + (rh - bhgt) * 0.5f;
 		float bx = a.x + rw - 12.f * u;
 		char id[24];
 
 		{
-			const float ms = 32.f * u;
+			const float ms = 26.f * u;
 			bx -= ms; snprintf(id, sizeof id, "##mo%d", ci);
 			if (MoreButton(id, ImVec2(bx, by), ms, bhgt))
 				OpenDlg(Dlg::Clip, clip.path, recent ? clip.folder : p->currentClipFolder, std::filesystem::u8path(clip.path).stem().u8string());
-			bx -= 8.f * u;
+			bx -= 6.f * u;
 		}
 		if (pending) {
-			const float wc = ButtonW(lCancel, 14.f, 24.f);
+			const float wc = ButtonW(lCancel, 12.f, 18.f);
 			bx -= wc; snprintf(id, sizeof id, "##cn%d", ci);
-			if (Button(id, ImVec2(bx, by), ImVec2(wc, bhgt), lCancel, 0, true, 14.f)) gPendingDelete.clear();
-			bx -= 8.f * u;
+			if (Button(id, ImVec2(bx, by), ImVec2(wc, bhgt), lCancel, 0, true, 12.f)) gPendingDelete.clear();
+			bx -= 6.f * u;
 		}
 		{
-			const float wd = ButtonW(lDel, 14.f, 24.f);
+			const float wd = ButtonW(lDel, 12.f, 18.f);
 			bx -= wd; snprintf(id, sizeof id, "##dl%d", ci);
-			if (Button(id, ImVec2(bx, by), ImVec2(wd, bhgt), lDel, 2, true, 14.f)) {
+			if (Button(id, ImVec2(bx, by), ImVec2(wd, bhgt), lDel, 2, true, 12.f)) {
 				if (pending) { clipToDelete = clip.path; gPendingDelete.clear(); }
 				else gPendingDelete = clip.path;
 			}
-			bx -= 8.f * u;
+			bx -= 6.f * u;
 		}
 		{
-			const float wl = ButtonW(lLoad, 14.f, 28.f);
+			const float wl = ButtonW(lLoad, 12.f, 20.f);
 			bx -= wl; snprintf(id, sizeof id, "##ld%d", ci);
-			if (Button(id, ImVec2(bx, by), ImVec2(wl, bhgt), lLoad, 1, clip.isCompatible && !converting, 14.f)) {
+			if (Button(id, ImVec2(bx, by), ImVec2(wl, bhgt), lLoad, 1, clip.isCompatible && !converting, 12.f)) {
 				const std::string clipPath = clip.path;
 				gw->SetTimeout([pl, clipPath](GameWrapper*) { pl->LoadClipAndOpen(clipPath); }, 0.f);
 			}
-			bx -= 14.f * u;
+			bx -= 10.f * u;
 		}
 
 		std::string name = std::filesystem::u8path(clip.path).stem().u8string();
 		std::string sub;
 		if (clip.isCompatible) {
-			if (!clip.saveTimeStr.empty()) sub += clip.saveTimeStr;
+			//"2026-10-23 10:36" -> "10-23 10:36": the year is rarely needed and the row is narrow
+			if (!clip.saveTimeStr.empty()) sub += clip.saveTimeStr.size() > 5 ? clip.saveTimeStr.substr(5) : clip.saveTimeStr;
 			if (clip.playerCount > 0) { if (!sub.empty()) sub += "  -  "; sub += std::to_string(clip.playerCount) + "p"; }
 		} else {
 			sub = Tr(ui::txtIncompat);
 		}
-		if (recent) {
-			if (!sub.empty()) sub += "  -  ";
-			sub += std::string(Tr(ui::txtIn)) + " " + (clip.folder.empty() ? std::string(Tr(ui::txtRoot)) : clip.folder);
-		}
 		dl->PushClipRect(a, ImVec2(bx, a.y + rh), true);
-		Text(ImVec2(a.x + 14.f * u, a.y + 9.f * u), name.c_str(), 16.f * u, clip.isCompatible ? kText : kDim);
-		Text(ImVec2(a.x + 14.f * u, a.y + 32.f * u), sub.c_str(), 13.f * u, clip.isCompatible ? kDim : C(110, 120, 132));
+		Text(ImVec2(a.x + 14.f * u, a.y + 6.f * u), name.c_str(), 15.f * u, clip.isCompatible ? kText : kDim);
+		float subX = a.x + 14.f * u;
+		Text(ImVec2(subX, a.y + 27.f * u), sub.c_str(), 13.f * u, clip.isCompatible ? kDim : C(110, 120, 132));
+		if (recent) { // flat list across folders: show which folder each clip is in (after the time and player count)
+			const std::string folderName = clip.folder.empty() ? std::string(Tr(ui::txtRoot)) : clip.folder;
+			subX += TextSize(sub.c_str(), 13.f * u).x + 14.f * u;
+			IconFolder(dl, ImVec2(subX + 6.f * u, a.y + 27.f * u + 7.f * u), 12.f * u, kAmber);
+			Text(ImVec2(subX + 18.f * u, a.y + 27.f * u), folderName.c_str(), 13.f * u, kAmber);
+		}
 		dl->PopClipRect();
+		// the row text can be cut off - the full name and the folder are in a tooltip
+		if (hot && ImGui::GetIO().MousePos.x < bx) {
+			const std::string where = (recent ? clip.folder : p->currentClipFolder);
+			tip = name + "\n" + (where.empty() ? std::string(Tr(ui::txtRoot)) : "/" + where);
+			if (!sub.empty()) tip += "\n" + sub;
+		}
 		ly += rh + 6.f * u;
 		++ci;
 	}
 	EndScroll(sc, ly);
+	if (!tip.empty()) {
+		const float tpx = 14.f * u;
+		const ImVec2 ts = TextSize(tip.c_str(), tpx);
+		const ImVec2 disp = ImGui::GetIO().DisplaySize;
+		ImVec2 p0(ImGui::GetIO().MousePos.x + 14.f * u, ImGui::GetIO().MousePos.y + 18.f * u);
+		p0.x = (std::min)(p0.x, disp.x - ts.x - 24.f * u);
+		p0.y = (std::min)(p0.y, disp.y - ts.y - 24.f * u);
+		ImDrawList* fg = ImGui::GetForegroundDrawList();
+		fg->AddRectFilled(p0, ImVec2(p0.x + ts.x + 20.f * u, p0.y + ts.y + 14.f * u), C(15, 18, 23, 242), 4.f * u);
+		fg->AddRect(p0, ImVec2(p0.x + ts.x + 20.f * u, p0.y + ts.y + 14.f * u), kLine, 4.f * u, ImDrawCornerFlags_All, 1.2f);
+		TextOn(fg, ImVec2(p0.x + 10.f * u, p0.y + 7.f * u), tip.c_str(), tpx, kText);
+	}
 
 	// navigation/deletion are applied here rather than inline above: RefreshSavedClipsList() mutates the vectors that
 	// were being iterated

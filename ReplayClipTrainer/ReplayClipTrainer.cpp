@@ -682,6 +682,7 @@ void ReplayClipTrainer::ControllGame(std::string oldValue, CVarWrapper cvar) {
 			carit = (RecordedSpectateIndex >= 0 && RecordedSpectateIndex < LobbySize) ? RecordedSpectateIndex : 0;
 			CountdownTime = 0;
 			jumpInSettleTicks = 0;
+			nativeCountdownDone_ = false;
 			timesNotConverted.clear();
 			//isInOvertime = false;
 			OrangeScore = 0;
@@ -774,7 +775,8 @@ void ReplayClipTrainer::ControllGamePerTick(std::string eventName) {
 	if (cvarManager->getCvar("reclip_controllGame").getBoolValue() == true && gameWrapper->IsInGame() == true && gameWrapper->IsInFreeplay() == false) {
 		if (Tick < (SavedFrames - 8)) {
 			//wait out the private match's own kickoff countdown before taking over, so Tick doesn't advance while the ball/cars are still locked to center
-			if (isInGoalReplay == false && gameWrapper->GetGameEventAsServer().GetReplicatedRoundCountDownNumber() == 0) {
+			if (nativeCountdownDone_ == false && gameWrapper->GetGameEventAsServer().GetReplicatedRoundCountDownNumber() == 0) { nativeCountdownDone_ = true; }
+			if (isInGoalReplay == false && nativeCountdownDone_) {
 
 				//cars
 				for (int i = 1;i < LobbySize + 1;i++) {
@@ -795,6 +797,9 @@ void ReplayClipTrainer::ControllGamePerTick(std::string eventName) {
 							if (cvarManager->getCvar("reclip_limitedBoost").getBoolValue() == false) { gameWrapper->GetGameEventAsServer().GetCars().Get(0).GetBoostComponent().SetBoostAmount(1.0f); }
 						}
 						else {
+							//while paused after "take over", use up the settle time now: otherwise the first unpause would
+							//replay ~0.5 s of the recording before the player gets control
+							if (jumpInOn && jumpInSettleTicks > 0) { jumpInSettleTicks--; }
 							SetCar(0, i - 1);
 						}
 					}
@@ -932,6 +937,8 @@ void ReplayClipTrainer::SetGameInfo() {
 	gameWrapper->GetGameEventAsServer().SetScoreAndTime(gameWrapper->GetGameEventAsServer().GetLocalPrimaryPlayer(), GameInfoPerFrame.at(Tick).BlueScore, GameInfoPerFrame.at(Tick).OrangeScore, GameInfoPerFrame.at(Tick).TimeRemaining, false, false);
 
 	if (GameInfoPerFrame.at(Tick).Countdowntime != CountdownTime) {
+		this->Log("[countdown] recorded countdown " + std::to_string(GameInfoPerFrame.at(Tick).Countdowntime) + " at tick " + std::to_string(Tick)
+			+ ", native " + std::to_string(gameWrapper->GetGameEventAsServer().GetReplicatedRoundCountDownNumber()));
 		if (GameInfoPerFrame.at(Tick).Countdowntime == 0) {
 			gameWrapper->GetGameEventAsServer().BroadcastGoMessage();
 		}

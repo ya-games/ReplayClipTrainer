@@ -258,6 +258,10 @@ public:
 	//gives the engine's velocity replication time to settle so a high (e.g. supersonic) speed
 	//doesn't get reset to 0 on handoff
 	int jumpInSettleTicks = 0;
+	//true once the private match's own kickoff countdown has finished (ReplicatedRoundCountDownNumber seen at 0). Playback waits for
+	//this, but must not keep waiting on that number afterwards: a clip that starts in a recorded kickoff countdown broadcasts
+	//countdown messages, and gating every tick on the number being 0 could then freeze the whole session.
+	bool nativeCountdownDone_ = false;
 	//debounces reclip_jumpIn's toggle bind - holding the bound gamepad button (e.g. Select/Back) can
 	//re-fire the toggle every tick instead of once per physical press, making JumpIn/JumpOut flicker
 	//back and forth. See JumpIn() in ReplayClipTrainer.cpp.
