@@ -219,6 +219,15 @@ void ReplayClipTrainer::SaveReplay(std::string oldValue, CVarWrapper cvar) {
 					if (ConvertStartFrame < 0 || ConvertStartFrame >= ReplaySize) { ConvertStartFrame = 0; }
 					useClipRange = false;
 
+					{
+						CameraWrapper camera = gameWrapper->GetCamera();
+						if (!camera.IsNull()) {
+							sourceCameraState_ = camera.GetCameraState();
+							sourceFocusActor_ = camera.GetFocusActor();
+							this->Log("[view] saved camera state '" + sourceCameraState_ + "', focus '" + sourceFocusActor_ + "'");
+						}
+					}
+					lastSourceStartSec_ = static_cast<float>(ConvertStartFrame) / static_cast<float>((std::max)(1, ReplayFPS));
 					gameWrapper->GetGameEventAsReplay().SkipToFrame(ConvertStartFrame);
 
 					gameWrapper->HookEvent("Function TAGame.EngineShare_TA.EventPostPhysicsStep", std::bind(&ReplayClipTrainer::SaveGameState, this, std::placeholders::_1));
@@ -1114,8 +1123,11 @@ void ReplayClipTrainer::ConvertClip(std::string oldValue, CVarWrapper cvar) {
 	}
 }
 
+static std::filesystem::path GetClipsRootFolder(GameWrapper* gameWrapper);
+static bool IsSafeRelativePath(const std::string& rel);
+
 //converts a clip like ConvertClip(), but saves the result to a named file instead of opening a private match immediately
-void ReplayClipTrainer::ConvertClipToFile(std::string name) {
+void ReplayClipTrainer::ConvertClipToFile(std::string name, std::string folder) {
 	if (gameWrapper->IsInReplay() == false) {
 		this->Log("you must be in a replay to execute this command");
 		return;
@@ -1136,6 +1148,7 @@ void ReplayClipTrainer::ConvertClipToFile(std::string name) {
 	useClipRange = true;
 	pendingSaveToFile = true;
 	pendingSaveName = name;
+	pendingSaveFolder = folder;
 
 	cvarManager->executeCommand("reclip_replaySave 1", true);
 }
@@ -1159,7 +1172,9 @@ void ReplayClipTrainer::SaveCurrentClipToFile(std::string name) {
 	//build the path from a wide string so a non-ASCII (e.g. Japanese) name survives correctly -
 	//constructing std::filesystem::path from a UTF-8 std::string directly would go through the
 	//Windows ANSI codepage instead and can garble or fail
-	std::filesystem::path folder = std::filesystem::path(gameWrapper->GetBakkesModPath().wstring()) / L"data" / L"replayClipTrainer" / L"clips";
+	std::filesystem::path folder = GetClipsRootFolder(gameWrapper.get());
+	if (!pendingSaveFolder.empty() && IsSafeRelativePath(pendingSaveFolder)) { folder /= std::filesystem::u8path(pendingSaveFolder); }
+	pendingSaveFolder.clear();
 	std::filesystem::create_directories(folder);
 	std::filesystem::path path = folder / (Utf8ToWString(name) + L".reclip");
 
@@ -1273,6 +1288,43 @@ void ReplayClipTrainer::OpenClipsFolder() {
 	std::filesystem::path folder = currentClipFolder.empty() ? root : root / std::filesystem::u8path(currentClipFolder);
 	std::filesystem::create_directories(folder);
 	ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+//---- reopening the source replay ----
+
+bool ReplayClipTrainer::ReopenSourceReplay() {
+	std::filesystem::path file = std::filesystem::path(gameWrapper->GetBakkesModPath().wstring()) / L"data" / L"replayClipTrainer" / L"current.replay";
+	std::error_code ec;
+	if (!std::filesystem::exists(file, ec) || ec) { return false; }
+	isPreparingSession = false;
+	//start a little before the last clip so the scene leading into it is visible
+	const float startSec = (std::max)(0.f, lastSourceStartSec_ - 3.f);
+	this->Log("reopening the last converted replay at " + std::to_string(startSec) + " s");
+	gameWrapper->PlayReplayFromTime(file.wstring(), startSec);
+	//the replay takes a few seconds to load - then put the camera mode and the spectated player back
+	gameWrapper->SetTimeout([this](GameWrapper*) { RestoreReplayView(0, 0); }, 1.0f);
+	return true;
+}
+
+//waits until the reopened replay is up, then applies the saved camera state and spectated player (a few times: the
+//replay can reset the view while it is still starting)
+void ReplayClipTrainer::RestoreReplayView(int attempt, int applied) {
+	if (attempt > 60 || applied >= 3) { return; }
+	if (gameWrapper->IsInReplay()) {
+		ReplayServerWrapper replay = gameWrapper->GetGameEventAsReplay();
+		CameraWrapper camera = gameWrapper->GetCamera();
+		if (!replay.IsNull() && !camera.IsNull()) {
+			if (!sourceFocusActor_.empty()) {
+				const bool ok = camera.SetFocusActor(sourceFocusActor_);
+				this->Log(std::string("[view] focus '") + sourceFocusActor_ + "': " + (ok ? "ok" : "failed"));
+			}
+			if (!sourceCameraState_.empty()) { camera.SetCameraState(sourceCameraState_); }
+			this->Log("[view] camera state now '" + camera.GetCameraState() + "', focus '" + camera.GetFocusActor() + "'");
+			gameWrapper->SetTimeout([this, attempt, applied](GameWrapper*) { RestoreReplayView(attempt + 1, applied + 1); }, 1.0f);
+			return;
+		}
+	}
+	gameWrapper->SetTimeout([this, attempt, applied](GameWrapper*) { RestoreReplayView(attempt + 1, applied); }, 0.5f);
 }
 
 //---- clip / folder management ----

@@ -72,6 +72,7 @@ int gTab = 0;
 char gNameBuf[128] = "";
 std::string gPendingDelete;   // clip whose "Confirm delete" is showing
 bool gShowNoRetry = false;
+bool gShowNoSource = false;
 int gSeekFrame = 0;           // replay position bar: the frame being dragged to
 bool gSeeking = false;
 bool gProgressShown = false; // conversion progress overlay: Cancel only reacts a moment after it appears
@@ -88,6 +89,12 @@ std::string gDlgErr;                  // error key of the last failed action
 std::vector<std::string> gDlgFolders; // every folder under the clips root, "" = root
 char gDlgBuf[128] = "";
 bool gDlgConfirmDelete = false;
+
+// folder the next "save" goes into (relative to the clips root, "" = root) and its cached choices
+std::string gSaveFolder;
+bool gSaveFolderOpen = false;
+std::vector<std::string> gSaveFolders;
+double gSaveFoldersTime = -100.0;
 
 } // namespace
 
@@ -287,6 +294,10 @@ struct UiPainter
 		snprintf(tt, sizeof tt, "%d:%02d / %d:%02d", curSec / 60, curSec % 60, totSec / 60, totSec % 60);
 		ImVec2 ts = TextSize(tt, 15.f * u);
 		Text(ImVec2(a.x + w - ts.x, a.y), tt, 15.f * u, kAmber);
+		const int remSec = (std::max)(0, totSec - curSec);
+		char rem[48];
+		snprintf(rem, sizeof rem, Tr(ui::txtRemain), remSec / 60, remSec % 60);
+		Text(ImVec2(a.x, a.y), rem, 15.f * u, kDim);
 
 		const float ty = a.y + 35.f * u, th = 6.f * u;
 		const float t = maxFrame > 0 ? (float)gSeekFrame / (float)maxFrame : 0.f;
@@ -563,11 +574,23 @@ void UiPainter::TabConvert(ImVec2 o, float w, float h)
 		std::vector<ReplayMarker> marks;
 		{ std::lock_guard<std::mutex> l(p->markersMutex_); marks = p->replayMarkers_; }
 		SeekBar("##seek", at(0, y), cw, cur, total, fps, marks);
+		y += 54.f * u;
 	} else if (!inReplay) {
 		p->markersKey_ = -1;
-		Para(at(0, y + 4.f * u), Tr(ui::notInReplay), 14.f * u, kDim, cw);
+		float hh = Para(at(0, y + 4.f * u), Tr(ui::notInReplay), 14.f * u, kDim, cw);
+		const char* s = Tr(ui::btnReopen);
+		const float bwid = ButtonW(s, 15.f, 40.f);
+		if (Button("##reopen", at(0, y + hh + 12.f * u), ImVec2(bwid, 34.f * u), s, 0, !converting, 15.f)) {
+			gShowNoSource = false;
+			gw->SetTimeout([pl](GameWrapper*) { if (!pl->ReopenSourceReplay()) gShowNoSource = true; }, 0.f);
+		}
+		hh += 12.f * u + 34.f * u + 6.f * u;
+		hh += Para(at(0, y + hh), Tr(ui::reopenHint), 13.f * u, kDim, cw) + 4.f * u;
+		if (gShowNoSource) hh += Para(at(0, y + hh), Tr(ui::noSourceReplay), 14.f * u, kRed, cw) + 4.f * u;
+		y += (std::max)(54.f * u, hh + 10.f * u);
+	} else {
+		y += 54.f * u;
 	}
-	y += 54.f * u;
 
 	// ---- clip range ----
 	Section(at(0, y), cw, ui::lblRange);
@@ -593,17 +616,61 @@ void UiPainter::TabConvert(ImVec2 o, float w, float h)
 	NameInput("##clipName", at(0, y), ImVec2(cw, 38.f * u), ui::phName);
 	y += 48.f * u;
 	{
-		const float saveH = (std::max)(64.f * u, 38.f * u + TextSize(Tr(ui::btnSaveD), 13.f * u, cw - 78.f * u).y + 14.f * u);
-		if (Card("##save", at(0, y), ImVec2(cw, saveH), ui::btnSave, ui::btnSaveD, IconSave, true, canConvert)) {
-			std::string name(gNameBuf);
-			gw->SetTimeout([pl, name](GameWrapper*) { pl->ConvertClipToFile(name); }, 0.f);
-			gNameBuf[0] = '\0';
+		const double now = ImGui::GetTime();
+		if (now - gSaveFoldersTime > 2.0) { // the folder list is a disk scan - refresh it only now and then
+			gSaveFolders = p->ListClipFolders();
+			gSaveFoldersTime = now;
 		}
-		y += saveH + 10.f * u;
+		if (std::find(gSaveFolders.begin(), gSaveFolders.end(), gSaveFolder) == gSaveFolders.end()) gSaveFolder.clear();
+		// one button showing the current destination; it unfolds the list of folders
+		const std::string cur = std::string(Tr(ui::lblSaveTo)) + ": " + (gSaveFolder.empty() ? std::string(Tr(ui::txtRoot)) : "/" + gSaveFolder);
+		// folder rows in the style of the clip tab / move list: folder icon, full width
+		auto row = [&](const char* id, const std::string& text, bool sel, bool header) {
+			const ImVec2 a = at(0, y);
+			bool hov = false;
+			const bool clicked = Hit(id, a, ImVec2(cw, 38.f * u), &hov);
+			dl->AddRectFilled(a, ImVec2(a.x + cw, a.y + 38.f * u), hov ? C(30, 37, 46) : kPanel, 4.f * u);
+			dl->AddRect(a, ImVec2(a.x + cw, a.y + 38.f * u), (hov || sel) ? kCyan : kLine, 4.f * u, ImDrawCornerFlags_All, sel ? 1.8f : 1.f);
+			IconFolder(dl, ImVec2(a.x + 22.f * u, a.y + 19.f * u), 18.f * u, kAmber);
+			dl->PushClipRect(a, ImVec2(a.x + cw - 36.f * u, a.y + 38.f * u), true);
+			Text(ImVec2(a.x + 42.f * u, a.y + 9.f * u), text.c_str(), 15.f * u, kText);
+			dl->PopClipRect();
+			if (header) {
+				const ImVec2 tc(a.x + cw - 20.f * u, a.y + 19.f * u), r(5.f * u, 3.f * u);
+				if (gSaveFolderOpen) dl->AddTriangleFilled(ImVec2(tc.x - r.x, tc.y + r.y), ImVec2(tc.x + r.x, tc.y + r.y), ImVec2(tc.x, tc.y - r.y), kDim);
+				else dl->AddTriangleFilled(ImVec2(tc.x - r.x, tc.y - r.y), ImVec2(tc.x + r.x, tc.y - r.y), ImVec2(tc.x, tc.y + r.y), kDim);
+			}
+			y += 44.f * u;
+			return clicked;
+		};
+		if (row("##sfOpen", cur, false, true)) gSaveFolderOpen = !gSaveFolderOpen;
+		if (gSaveFolderOpen) {
+			int fi = 0;
+			for (const std::string& folder : gSaveFolders) {
+				std::string label = folder.empty() ? std::string(Tr(ui::txtRoot)) : "/" + folder;
+				const bool sel = folder == gSaveFolder;
+				if (sel) label += "  " + std::string(Tr(ui::txtCurrent));
+				char id[24]; snprintf(id, sizeof id, "##sf%d", fi++);
+				if (row(id, label, sel, false)) { gSaveFolder = folder; gSaveFolderOpen = false; }
+			}
+		}
+		y += 4.f * u;
 	}
 	CvarToggle("##tgAnon", at(0, y), cw, ui::tgAnon, "reclip_anonymize");
 	y += 32.f * u;
-	y += Para(at(56.f * u, y), Tr(ui::anonD), 13.f * u, kDim, cw - 56.f * u) + 18.f * u;
+	y += Para(at(56.f * u, y), Tr(ui::anonD), 13.f * u, kDim, cw - 56.f * u) + 12.f * u;
+	{
+		const char* s = Tr(ui::btnSave);
+		const float bwid = ButtonW(s, 15.f, 36.f);
+		if (Button("##save", at(0, y), ImVec2(bwid, 32.f * u), s, 0, canConvert, 15.f)) {
+			std::string name(gNameBuf);
+			const std::string folder = gSaveFolder;
+			gw->SetTimeout([pl, name, folder](GameWrapper*) { pl->ConvertClipToFile(name, folder); }, 0.f);
+			gNameBuf[0] = '\0';
+		}
+		const float dh = Para(at(bwid + 12.f * u, y + 2.f * u), Tr(ui::btnSaveD), 13.f * u, kDim, cw - bwid - 12.f * u);
+		y += (std::max)(32.f * u, dh + 4.f * u) + 18.f * u;
+	}
 
 	// ---- train without saving: a side feature, kept small ----
 	Section(at(0, y), cw, ui::lblQuick);

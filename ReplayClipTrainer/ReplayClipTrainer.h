@@ -107,13 +107,21 @@ public:
 	void JumpIn(std::string oldValue, CVarWrapper cvar);
 	void Convert(std::string oldValue, CVarWrapper cvar);
 	void ConvertClip(std::string oldValue, CVarWrapper cvar);
-	void ConvertClipToFile(std::string name);
+	void ConvertClipToFile(std::string name, std::string folder = std::string()); //folder: relative to the clips root, "" = root
 	void SaveCurrentClipToFile(std::string name);
 	void LoadClipAndOpen(std::string path);
 	void RefreshSavedClipsList();
 	void RefreshRecentClipsList();
 	void RefreshActiveClipList();
 	void OpenClipsFolder();
+	//opens the replay that was last converted from (the temporary export made at every conversion) again, a few seconds
+	//before the last clip - lets you go back from a practice session to cut more scenes. Returns false if there is none.
+	bool ReopenSourceReplay();
+	float lastSourceStartSec_ = 0.f; //start of the last converted range, in seconds into the replay
+	//the camera mode and the spectated player at the time of the last conversion, put back after ReopenSourceReplay()
+	std::string sourceCameraState_;
+	std::string sourceFocusActor_;
+	void RestoreReplayView(int attempt, int applied);
 	//clip / folder management for the clips tab. Each returns "" on success or an error key: "exists", "invalid", "notEmpty", "failed".
 	//Folder paths are relative to the clips root, '/'-separated, UTF-8.
 	std::string CreateClipFolder(const std::string& name);                              //inside currentClipFolder
@@ -152,6 +160,7 @@ public:
 	bool lastSaveClipSucceeded = false;
 	bool pendingSaveToFile = false;
 	std::string pendingSaveName;
+	std::string pendingSaveFolder;
 	void OpenReplay(std::string oldValue, CVarWrapper cvar);
 	void Bindings(std::string oldValue, CVarWrapper cvar);
 	void AutoConvertCvar(std::string oldValue, CVarWrapper cvar);

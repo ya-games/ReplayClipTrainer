@@ -48,6 +48,8 @@
 	X(dlgClip,      "CLIP OPTIONS", u8"クリップの操作") \
 	X(dlgFolder,    "FOLDER OPTIONS", u8"フォルダの操作") \
 	X(lblMoveTo,    "MOVE TO", u8"移動先") \
+	X(txtRemain,    "%d:%02d left", u8"残り %d:%02d") \
+	X(lblSaveTo,   "Save to folder", u8"保存先フォルダ") \
 	X(txtCurrent,   "(current)", u8"(現在地)") \
 	X(btnDeleteFolder, "Delete folder", u8"フォルダを削除") \
 	X(btnConfirmFolder, "Confirm delete folder", u8"削除する") \
@@ -57,6 +59,9 @@
 	X(errFailed,    "The operation failed.", u8"操作に失敗しました。") \
 	X(guideText,    "Left / Right : back 5 s / forward 5 s\nUp / Down : switch player\nB : pause / resume\nV : take over / back to auto-play\nPad : D-pad / L3 / Back work the same way", u8"← / → : 5秒戻る / 5秒進む\n↑ / ↓ : 選手の切り替え\nB : 一時停止 / 再開\nV : 自分で操作 / 自動再生に戻す\nパッド : 十字キー / L3 / Back で同様に操作") \
 	X(tgKeyGuide,   "Show the key guide on screen", u8"画面にキー操作の説明を表示") \
+	X(btnReopen,    "Reopen the last converted replay", u8"直前に変換したリプレイを開く") \
+	X(reopenHint,   "Opens the replay you last converted from, a few seconds before the last clip, so you can cut another scene.", u8"最後に変換したリプレイを、直前のクリップの少し前から開き直します。別の場面を切り出せます。") \
+	X(noSourceReplay, "No converted replay yet - nothing to reopen.", u8"変換したリプレイがまだないため、開けません。") \
 	X(tgAnon,       "Anonymize player names when saving", u8"保存時に選手名を匿名化") \
 	X(anonD,        "Names become Player1, 2, 3...: the player you were spectating is Player1, then their teammates, then the opponents (1v1 to 3v3).", u8"選手名を Player1, 2, 3... に置き換えます。観戦していた選手が Player1、次に味方、最後に相手の順です(1v1〜3v3対応)。") \
 	X(errShort,     "Clip is too short - Before + After must add up to at least %d seconds.", u8"クリップが短すぎます。「何秒前」と「何秒後」の合計を %d 秒以上にしてください。") \
